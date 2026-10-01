@@ -1,8 +1,8 @@
 //! Bounded agent messages.
 
+use crate::tool::{MAX_TOOL_CALLS_PER_TURN, ToolCall, ToolResult};
 use bitty_agent_api::AgentError;
 use bitty_agent_api::AgentId;
-use crate::tool::{MAX_TOOL_CALLS_PER_TURN, ToolCall, ToolResult};
 
 /// Maximum bytes for `AgentMessage::content`.
 pub const MAX_MESSAGE_BYTES: usize = 32 * 1024;
@@ -122,6 +122,14 @@ impl AgentMessage {
     ///
     /// This is the fail-closed constructor: callers that know the content is
     /// host-owned use [`Self::new_trusted`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AgentError`] when `content` exceeds [`MAX_MESSAGE_BYTES`] or
+    /// contains a NUL byte, when `tool_calls`/`tool_results` exceed
+    /// [`MAX_TOOL_CALLS_PER_TURN`] or fail their own validation, when
+    /// `role == Role::Tool` without at least one tool result, or when the
+    /// combined frame size exceeds [`MAX_MESSAGE_FRAME_BYTES`].
     pub fn new(
         sequence: u64,
         agent_id: AgentId,
@@ -192,6 +200,11 @@ impl AgentMessage {
     }
 
     /// Validate this message.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AgentError`] under the same conditions documented on
+    /// [`Self::new`].
     pub fn validate(&self) -> Result<(), AgentError> {
         if self.content.len() > MAX_MESSAGE_BYTES {
             return Err(AgentError::LimitExceeded {
@@ -312,7 +325,7 @@ mod tests {
 
     #[test]
     fn tool_calls_cap() {
-        let calls: Vec<ToolCall> = (0..MAX_TOOL_CALLS_PER_TURN + 1)
+        let calls: Vec<ToolCall> = (0..=MAX_TOOL_CALLS_PER_TURN)
             .map(|i| ToolCall::new(format!("id{i}"), "read_file", "{}").unwrap())
             .collect();
         assert!(AgentMessage::new(1, agent_id(), Role::Assistant, "", calls, vec![]).is_err());

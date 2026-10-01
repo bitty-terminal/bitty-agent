@@ -117,7 +117,9 @@ impl AgentError {
                 ErrorClass::Identity
             }
             Self::Duplicate { kind, .. } if kind == "tool" => ErrorClass::Tool,
-            Self::Duplicate { .. } | Self::Session { .. } | Self::NotFound { .. } => ErrorClass::Session,
+            Self::Duplicate { .. } | Self::Session { .. } | Self::NotFound { .. } => {
+                ErrorClass::Session
+            }
             Self::Tool { .. } => ErrorClass::Tool,
         }
     }

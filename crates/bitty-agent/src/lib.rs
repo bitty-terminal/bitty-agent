@@ -8,7 +8,7 @@
 //! `DevTools -> Rich Presentation -> IPC -> Agent`) recorded in
 //! `docs/product/proposed-delivery-sequence.md`. The Agent contract is
 //! **accepted**: the IPC and Agent RFC closed `OQ-018` on 2026-08-29 and the
-//! DevTools RFC closed `OQ-019` on 2026-08-28 (see the bitty-docs
+//! `DevTools` RFC closed `OQ-019` on 2026-08-28 (see the bitty-docs
 //! open-questions register). This crate owns the generic, host-neutral side
 //! of that contract — identity, bounded messages, observations, bounded
 //! coordination — while wire framing, transport, auth, scopes, and rate
@@ -20,9 +20,9 @@
 //! rate-limited, and exposed to IPC/MCP clients?*) is **closed** by the
 //! accepted IPC and Agent RFC (2026-08-29: instance selection, transport and
 //! framing, wire and auth, scope families, rate limits `RC-9`/`RC-10`, Agent
-//! bounded messages, consent, streaming). `OQ-019` (*When do DevTools,
+//! bounded messages, consent, streaming). `OQ-019` (*When do `DevTools`,
 //! record/replay, debug protocol, and MCP adapter enter the roadmap?*) is
-//! **closed** by the accepted DevTools RFC (2026-08-28). This crate therefore
+//! **closed** by the accepted `DevTools` RFC (2026-08-28). This crate therefore
 //! owns the small, headless-testable vocabulary beneath those RFCs: an owned
 //! `AgentId`, bounded `AgentMessage`s, stub tool calls with **no LLM I/O**,
 //! and the bounded observation side queue required by `ADR-0003` rule 4.
@@ -213,7 +213,7 @@
 //! # Drift and honesty statement
 //!
 //! The Agent contract is accepted: the IPC and Agent RFC closed `OQ-018` on
-//! 2026-08-29 (Agent bounded messages, consent, streaming) and the DevTools
+//! 2026-08-29 (Agent bounded messages, consent, streaming) and the `DevTools`
 //! RFC closed `OQ-019` on 2026-08-28. The other canonical sources are the
 //! spine in `proposed-delivery-sequence.md`, the boundaries in
 //! `architecture/overview.md` and `core-boundaries.md` (AI and Agent

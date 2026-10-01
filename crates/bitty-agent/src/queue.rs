@@ -33,6 +33,7 @@ impl<T> SideQueue<T> {
     /// # Panics
     ///
     /// Panics when `capacity == 0`.
+    #[must_use]
     pub fn new(capacity: usize) -> Self {
         assert!(capacity > 0, "side queue capacity must be > 0");
         Self {

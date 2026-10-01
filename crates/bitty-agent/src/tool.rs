@@ -172,19 +172,6 @@ pub fn is_sensitive_key(key: &str) -> bool {
 /// `/tmp/x` or `hello` pass through. Already-redacted markers never match.
 #[must_use]
 pub fn looks_like_secret_token(value: &str) -> bool {
-    let v = value.trim();
-    if v.is_empty() || v == REDACTED_MARKER || v == "[REDACTED]" || v == "***" {
-        return false;
-    }
-    if v.len() < 8 {
-        return false;
-    }
-    if v.contains("-----BEGIN") {
-        return true;
-    }
-    if v.starts_with("eyJ") && v.contains('.') && v.len() >= 20 {
-        return true;
-    }
     const PREFIXES: &[&str] = &[
         "AKIA",
         "ASIA",
@@ -212,6 +199,19 @@ pub fn looks_like_secret_token(value: &str) -> bool {
         "rk-live-",
         "pk-live-",
     ];
+    let v = value.trim();
+    if v.is_empty() || v == REDACTED_MARKER || v == "[REDACTED]" || v == "***" {
+        return false;
+    }
+    if v.len() < 8 {
+        return false;
+    }
+    if v.contains("-----BEGIN") {
+        return true;
+    }
+    if v.starts_with("eyJ") && v.contains('.') && v.len() >= 20 {
+        return true;
+    }
     for p in PREFIXES {
         if v.contains(p) {
             return true;
@@ -319,7 +319,7 @@ fn is_ascii_ws(b: u8) -> bool {
 }
 
 fn char_len_at(s: &str, idx: usize) -> usize {
-    s[idx..].chars().next().map_or(1, |c| c.len_utf8())
+    s[idx..].chars().next().map_or(1, char::len_utf8)
 }
 
 fn find_closing_quote(bytes: &[u8], start: usize, quote: u8) -> Option<usize> {
@@ -390,6 +390,12 @@ fn is_key_char(b: u8) -> bool {
 /// Scrub `"key": value` / `'key': value` pairs. Returns `None` when a
 /// sensitive key has a malformed/unbalanced value (fail-safe: whole payload
 /// must be redacted by the caller).
+///
+/// Long by necessity: this is a single hand-rolled scanning pass over the
+/// input bytes (no external JSON parser dependency, per this crate's
+/// zero-dependency scrubbing posture); splitting it would scatter the
+/// shared `i`/`j` cursor state across functions without reducing complexity.
+#[allow(clippy::too_many_lines)]
 fn scrub_quoted_keys(input: &str) -> Option<String> {
     let bytes = input.as_bytes();
     let mut out = String::with_capacity(input.len());
@@ -423,7 +429,7 @@ fn scrub_quoted_keys(input: &str) -> Option<String> {
                     "'[redacted]'"
                 });
             } else {
-                out.push_str(&input[i..key_end + 1]);
+                out.push_str(&input[i..=key_end]);
             }
             i = key_end + 1;
             continue;
@@ -501,6 +507,10 @@ fn scrub_quoted_keys(input: &str) -> Option<String> {
 
 /// Scrub bare `key=value` / `key: value` pairs (unquoted keys). Returns `None`
 /// on malformed values under sensitive keys (fail-safe).
+///
+/// Long by necessity: see [`scrub_quoted_keys`] — this is the matching
+/// unquoted-key scanning pass sharing the same cursor-based design.
+#[allow(clippy::too_many_lines)]
 fn scrub_bare_keys(input: &str) -> Option<String> {
     let bytes = input.as_bytes();
     let mut out = String::with_capacity(input.len());
@@ -870,6 +880,12 @@ pub struct ToolSpec {
 
 impl ToolSpec {
     /// Validate this spec.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AgentError`] when `name` fails tool-name grammar
+    /// validation, when `description`/`input_schema` exceed their byte caps,
+    /// or when either contains a NUL byte.
     pub fn validate(&self) -> Result<(), AgentError> {
         validate_tool_name(&self.name)?;
         if self.description.len() > MAX_TOOL_DESCRIPTION_LEN {
@@ -921,6 +937,10 @@ impl std::fmt::Debug for ToolCall {
 
 impl ToolCall {
     /// Create and validate a tool call.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::validate`].
     pub fn new(
         id: impl Into<String>,
         name: impl Into<String>,
@@ -939,6 +959,13 @@ impl ToolCall {
     }
 
     /// Validate this call.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AgentError`] when `id` is empty, exceeds
+    /// [`MAX_TOOL_CALL_ID_LEN`], or contains a NUL byte; when `name` fails
+    /// tool-name grammar validation; or when `arguments` exceeds
+    /// [`MAX_TOOL_ARGS_BYTES`] or contains a NUL byte.
     pub fn validate(&self) -> Result<(), AgentError> {
         if self.id.is_empty() {
             return Err(AgentError::validation("tool call id", "must not be empty"));
@@ -1044,6 +1071,10 @@ impl std::fmt::Debug for ToolResult {
 
 impl ToolResult {
     /// Create and validate a tool result.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::validate`].
     pub fn new(
         call_id: impl Into<String>,
         content: impl Into<String>,
@@ -1061,6 +1092,12 @@ impl ToolResult {
     }
 
     /// Validate this result.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AgentError`] when `call_id` is empty, exceeds
+    /// [`MAX_TOOL_CALL_ID_LEN`], or contains a NUL byte; or when `content`
+    /// exceeds [`MAX_TOOL_RESULT_BYTES`] or contains a NUL byte.
     pub fn validate(&self) -> Result<(), AgentError> {
         if self.call_id.is_empty() {
             return Err(AgentError::validation(
@@ -1148,6 +1185,12 @@ impl ToolRegistry {
     }
 
     /// Create from specs (validates each).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AgentError::LimitExceeded`] when `specs` exceeds
+    /// [`MAX_TOOLS_PER_AGENT`], [`AgentError::Duplicate`] when two specs
+    /// share a name, or any validation error from [`ToolSpec::validate`].
     pub fn from_specs(specs: Vec<ToolSpec>) -> Result<Self, AgentError> {
         if specs.len() > MAX_TOOLS_PER_AGENT {
             return Err(AgentError::LimitExceeded {
@@ -1172,6 +1215,13 @@ impl ToolRegistry {
     }
 
     /// Insert a spec (validates, checks duplicates and cap).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AgentError`] from [`ToolSpec::validate`],
+    /// [`AgentError::LimitExceeded`] when the registry is already at
+    /// [`MAX_TOOLS_PER_AGENT`], or [`AgentError::Duplicate`] when a tool with
+    /// the same name is already declared.
     pub fn insert(&mut self, spec: ToolSpec) -> Result<(), AgentError> {
         spec.validate()?;
         if self.specs.len() >= MAX_TOOLS_PER_AGENT {
@@ -1205,6 +1255,12 @@ impl ToolRegistry {
 
     /// Syntactically validate a call against the registry (declared-name check +
     /// per-call bounds). No I/O, no execution.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`ToolCall::validate`], or
+    /// [`AgentError::Tool`] when `call.name` is not declared in this
+    /// registry.
     pub fn validate_call(&self, call: &ToolCall) -> Result<(), AgentError> {
         call.validate()?;
         if !self.contains(&call.name) {
@@ -1220,6 +1276,10 @@ impl ToolRegistry {
     ///
     /// Callers that need real tool execution must go through the capability-
     /// checked host outside this crate.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::validate_call`].
     pub fn stub_invoke(&self, call: &ToolCall) -> Result<ToolResult, AgentError> {
         self.validate_call(call)?;
         // Deterministic stub payload: no wall-clock, no randomness.
