@@ -1,0 +1,20 @@
+[package]
+name = "bitty-agent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "AI agent protocol layer: messages, tools, observations, bounded queues"
+
+[dependencies]
+bitty-agent-api = { path = "../bitty-agent-api" }
+thiserror = { workspace = true }
+serde = { workspace = true, optional = true }
+
+[features]
+default = []
+serde = ["dep:serde", "bitty-agent-api/serde"]
+
+[lints]
+workspace = true
