@@ -24,6 +24,9 @@ pub struct AgentId(String);
 
 impl AgentId {
     /// Parse and validate an agent id.
+    ///
+    /// # Errors
+    /// Returns `AgentError::InvalidAgentId` if the id is empty, too long, contains whitespace, or has invalid characters.
     pub fn new(raw: &str) -> Result<Self, AgentError> {
         validate_agent_id(raw)?;
         Ok(Self(raw.to_string()))
@@ -38,13 +41,13 @@ impl AgentId {
     /// Owner segment (before dot).
     #[must_use]
     pub fn owner(&self) -> &str {
-        self.0.split_once('.').map(|(a, _)| a).unwrap_or(&self.0)
+        self.0.split_once('.').map_or(&self.0, |(a, _)| a)
     }
 
     /// Name segment (after dot).
     #[must_use]
     pub fn name(&self) -> &str {
-        self.0.split_once('.').map(|(_, b)| b).unwrap_or("")
+        self.0.split_once('.').map_or("", |(_, b)| b)
     }
 }
 
@@ -75,7 +78,7 @@ fn validate_agent_id(raw: &str) -> Result<(), AgentError> {
             reason: format!("agent id too long (max {MAX_AGENT_ID_LEN})"),
         });
     }
-    if raw.chars().any(|c| c.is_whitespace()) {
+    if raw.chars().any(char::is_whitespace) {
         return Err(AgentError::InvalidAgentId {
             id: raw.to_string(),
             reason: "agent id must not contain whitespace".to_string(),

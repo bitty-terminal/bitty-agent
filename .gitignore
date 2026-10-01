@@ -1,16 +1,5 @@
-# Rust
 /target/
-Cargo.lock
-*.rlib
-*.pdb
-
-# Editor
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
+.targets/
+**/target/
+.carryctx/config.local.toml
+.worktrees/
