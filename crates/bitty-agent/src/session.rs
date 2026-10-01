@@ -6,12 +6,12 @@
 //! and no window/GPU coupling. The session is `std`-only and is exercised
 //! headlessly on both the Linux CI and the `windows-latest` job.
 
-use bitty_agent_api::AgentError;
-use bitty_agent_api::AgentId;
 use crate::message::{AgentMessage, MAX_MESSAGES_PER_SESSION, MAX_SESSION_BYTES, Role};
 use crate::observation::AgentObservation;
 use crate::queue::SideQueue;
 use crate::tool::{ToolCall, ToolRegistry, ToolResult, ToolSpec};
+use bitty_agent_api::AgentError;
+use bitty_agent_api::AgentId;
 
 /// Default side-queue capacity (candidate, not normative; `OQ-014` family).
 pub const DEFAULT_SIDE_QUEUE_CAPACITY: usize = 64;
@@ -73,6 +73,7 @@ pub struct AgentSession {
 
 impl AgentSession {
     /// Create a new session.
+    #[must_use]
     pub fn new(agent_id: AgentId, side_capacity: usize) -> Self {
         Self {
             agent_id,
@@ -86,6 +87,13 @@ impl AgentSession {
     }
 
     /// Create with an explicit tool registry.
+    ///
+    /// # Errors
+    ///
+    /// Currently infallible (the registry is validated by its own
+    /// constructor before being passed in); returns `Result` to leave room
+    /// for future session-level validation without a breaking signature
+    /// change.
     pub fn with_tools(
         agent_id: AgentId,
         tools: ToolRegistry,
@@ -128,6 +136,11 @@ impl AgentSession {
     }
 
     /// Insert a tool spec (validates, checks duplicates and cap).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AgentError::session`] when the session is already terminal,
+    /// or any validation/duplicate/cap error from [`ToolRegistry::insert`].
     pub fn declare_tool(&mut self, spec: ToolSpec) -> Result<(), AgentError> {
         if self.is_terminal() {
             return Err(AgentError::session(format!(
@@ -186,6 +199,10 @@ impl AgentSession {
     /// increments — mirroring the cold-queue / side-queue policy in
     /// `bitty-runtime` and `bitty-plugin-host`. The queue never holds hot-path
     /// objects (threat `T-07`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AgentError`] when `obs` fails [`AgentObservation::validate`].
     pub fn push_observation(&mut self, obs: AgentObservation) -> Result<(), AgentError> {
         obs.validate()?;
         self.side_queue.push(obs);
@@ -208,6 +225,15 @@ impl AgentSession {
     /// supplies `role`, `content`, `tool_calls`, and `tool_results` without a
     /// sequence. Tool calls are validated against the declared registry
     /// syntactically (unknown tool -> error), but no tool is executed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AgentError`] when the session is terminal, when the message
+    /// count or combined byte budget would exceed
+    /// [`MAX_MESSAGES_PER_SESSION`]/[`MAX_SESSION_BYTES`], when a tool call
+    /// names a tool absent from a non-empty registry, or when any tool
+    /// call/result or the constructed [`AgentMessage`] fails its own
+    /// validation.
     pub fn push_message(
         &mut self,
         role: Role,
@@ -269,13 +295,10 @@ impl AgentSession {
         // turn that requests tools enters `WaitingToolResult`; any other
         // message from `Created` enters `Running`.
         match (self.state, role, msg.tool_calls.is_empty()) {
-            (SessionState::Created, Role::Assistant, false) => {
+            (SessionState::Created | SessionState::Running, Role::Assistant, false) => {
                 self.state = SessionState::WaitingToolResult;
             }
             (SessionState::Created, _, _) => self.state = SessionState::Running,
-            (SessionState::Running, Role::Assistant, false) => {
-                self.state = SessionState::WaitingToolResult;
-            }
             (SessionState::WaitingToolResult, Role::Tool, _) => {
                 self.state = SessionState::Running;
             }
@@ -294,11 +317,19 @@ impl AgentSession {
     }
 
     /// Convenience: push a `Role::User` message.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::push_message`].
     pub fn push_user(&mut self, content: impl Into<String>) -> Result<u64, AgentError> {
         self.push_message(Role::User, content, vec![], vec![])
     }
 
     /// Convenience: push a `Role::Assistant` message optionally with tool calls.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::push_message`].
     pub fn push_assistant(
         &mut self,
         content: impl Into<String>,
@@ -308,6 +339,11 @@ impl AgentSession {
     }
 
     /// Convenience: push a `Role::Tool` result message.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AgentError::validation`] when `results` is empty, or any
+    /// error from [`Self::push_message`].
     pub fn push_tool_results(&mut self, results: Vec<ToolResult>) -> Result<u64, AgentError> {
         if results.is_empty() {
             return Err(AgentError::validation(
@@ -325,6 +361,11 @@ impl AgentSession {
     /// Real dispatch will be capability-checked by the host outside this
     /// crate. This method exists so tests can drive the `Assistant -> Tool`
     /// loop headlessly without describing it as implemented host behavior.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AgentError`] when any call fails [`ToolRegistry::stub_invoke`]
+    /// (e.g. an undeclared tool name).
     pub fn stub_dispatch(&self, calls: &[ToolCall]) -> Result<Vec<ToolResult>, AgentError> {
         let mut out = Vec::with_capacity(calls.len());
         for c in calls {
@@ -334,6 +375,10 @@ impl AgentSession {
     }
 
     /// Mark the session as completed normally.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AgentError::session`] when the session is already terminal.
     pub fn complete(&mut self) -> Result<(), AgentError> {
         if self.is_terminal() {
             return Err(AgentError::session(format!(
@@ -346,6 +391,11 @@ impl AgentSession {
     }
 
     /// Mark the session as failed (with reason for diagnostics — bounded).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AgentError::session`] when the session is already terminal,
+    /// or [`AgentError::LimitExceeded`] when `reason` exceeds 1024 bytes.
     pub fn fail(&mut self, reason: impl Into<String>) -> Result<(), AgentError> {
         if self.is_terminal() {
             return Err(AgentError::session(format!(

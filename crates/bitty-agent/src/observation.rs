@@ -76,6 +76,13 @@ pub enum AgentObservation {
 
 impl AgentObservation {
     /// Validate that every string payload respects `MAX_OBSERVATION_BYTES`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AgentError::LimitExceeded`] when a string payload exceeds
+    /// `MAX_OBSERVATION_BYTES` (or `Custom::kind` exceeds 128 bytes), and
+    /// [`AgentError::validation`]-style errors when `Custom::kind` is empty
+    /// or contains bytes outside `[a-z0-9_.-]`.
     pub fn validate(&self) -> Result<(), AgentError> {
         match self {
             Self::TitleChanged(s)
@@ -139,14 +146,11 @@ impl AgentObservation {
     #[must_use]
     pub fn byte_len(&self) -> usize {
         match self {
-            Self::TitleChanged(s) => s.len(),
-            Self::CwdChanged(s) => s.len(),
-            Self::Bell => 0,
+            Self::TitleChanged(s) | Self::CwdChanged(s) | Self::SelectionChanged(s) => s.len(),
+            Self::Bell | Self::ConfigReloaded => 0,
             Self::Damage { .. } => 8,
-            Self::SelectionChanged(s) => s.len(),
             Self::FocusChanged { .. } => 1,
             Self::ProcessExited { .. } => 4,
-            Self::ConfigReloaded => 0,
             Self::TerminalOutput { text } => text.len(),
             Self::Custom { kind, payload } => kind.len() + payload.len(),
         }
