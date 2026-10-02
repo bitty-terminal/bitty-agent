@@ -1,0 +1,40 @@
+{
+  "format": "carryctx-pack-dir",
+  "format_version": 2,
+  "carryctx_version": "0.11.6",
+  "schema_version": 18,
+  "project_id": "01MAGE42AGENT0000000000001",
+  "export_id": "01M3X9Z97334EZHF8PR8CK8S2B",
+  "created_at": "2026-10-02T03:19:21.571379356+00:00",
+  "parents": [],
+  "sequences": {
+    "display_id_CTX": 4,
+    "display_id_progress": 2
+  },
+  "source": {
+    "git_branch": "main",
+    "git_commit": "198021d8e1d21316a8fdbbc0e3913c2013202187",
+    "hostname": "unknown"
+  },
+  "counts": {
+    "agents": 2,
+    "checkpoint_corrections": 0,
+    "checkpoints": 0,
+    "decisions": 0,
+    "events": 18,
+    "graph_edges": 0,
+    "graph_nodes": 0,
+    "handoffs": 0,
+    "progress_items": 1,
+    "scopes": 0,
+    "sequences": 2,
+    "sessions": 0,
+    "task_dependencies": 0,
+    "tasks": 3,
+    "team_members": 0,
+    "teams": 0,
+    "tombstones": 1,
+    "worktrees": 0
+  },
+  "redacted": true
+}
