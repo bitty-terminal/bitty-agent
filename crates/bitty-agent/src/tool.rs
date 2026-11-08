@@ -81,7 +81,8 @@ const QUOTED_REDACTED: &str = "\"[redacted]\"";
 /// `pw`/`pass` such as `power` or `bypass`).
 #[must_use]
 pub fn is_sensitive_key(key: &str) -> bool {
-    let lower = key.to_ascii_lowercase();
+    let unescaped = unescape_json_key(key);
+    let lower = unescaped.to_ascii_lowercase();
     let l = lower.as_str();
     if matches!(
         l,
@@ -387,6 +388,37 @@ fn is_key_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-')
 }
 
+fn unescape_json_key(key: &str) -> String {
+    if !key.contains('\\') {
+        return key.to_string();
+    }
+    let bytes = key.as_bytes();
+    let mut out = String::with_capacity(key.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && i + 1 < bytes.len() {
+            if bytes[i + 1] == b'u'
+                && i + 5 < bytes.len()
+                && let Ok(hex_str) = std::str::from_utf8(&bytes[i + 2..i + 6])
+                && let Ok(code) = u32::from_str_radix(hex_str, 16)
+                && let Some(ch) = char::from_u32(code)
+            {
+                out.push(ch);
+                i += 6;
+                continue;
+            }
+            let next_len = char_len_at(key, i + 1);
+            out.push_str(&key[i + 1..i + 1 + next_len]);
+            i += 1 + next_len;
+            continue;
+        }
+        let len = char_len_at(key, i);
+        out.push_str(&key[i..i + len]);
+        i += len;
+    }
+    out
+}
+
 /// Scrub `"key": value` / `'key': value` pairs. Returns `None` when a
 /// sensitive key has a malformed/unbalanced value (fail-safe: whole payload
 /// must be redacted by the caller).
@@ -402,7 +434,9 @@ fn scrub_quoted_keys(input: &str) -> Option<String> {
     let mut i = 0usize;
     while i < bytes.len() {
         let b = bytes[i];
-        if b != b'"' && b != b'\'' {
+        if (b != b'"' && b != b'\'')
+            || (b == b'\'' && i > 0 && bytes[i - 1].is_ascii_alphanumeric())
+        {
             let len = char_len_at(input, i);
             out.push_str(&input[i..i + len]);
             i += len;
@@ -428,10 +462,31 @@ fn scrub_quoted_keys(input: &str) -> Option<String> {
                 } else {
                     "'[redacted]'"
                 });
+                i = key_end + 1;
+            } else if quote == b'\''
+                && key
+                    .bytes()
+                    .any(|c| matches!(c, b'"' | b'{' | b'}' | b':' | b'=' | b'\n' | b'\r'))
+            {
+                out.push('\'');
+                i += 1;
+            } else if quote == b'"' && key.contains("\\\"") {
+                let unescaped = key.replace("\\\"", "\"");
+                let scrubbed_inner = scrub_text(&unescaped);
+                if scrubbed_inner == REDACTED_MARKER {
+                    out.push_str(QUOTED_REDACTED);
+                } else if scrubbed_inner != unescaped {
+                    out.push('"');
+                    out.push_str(&scrubbed_inner.replace('"', "\\\""));
+                    out.push('"');
+                } else {
+                    out.push_str(&input[i..=key_end]);
+                }
+                i = key_end + 1;
             } else {
                 out.push_str(&input[i..=key_end]);
+                i = key_end + 1;
             }
-            i = key_end + 1;
             continue;
         }
         let colon = j;
@@ -1643,5 +1698,50 @@ mod tests {
         assert!(!sk_out.contains("sk-abcdefgh12345678"), "sk leak: {sk_out}");
         assert!(sk_out.contains(REDACTED_MARKER));
         assert!(looks_like_secret_token("sk-abcdefgh12345678"));
+    }
+
+    #[test]
+    fn scrub_prevents_apostrophe_desync_unicode_key_and_nested_json_bypass() {
+        // 1. Apostrophe in preceding prose paired with apostrophe inside a secret value.
+        let apostrophe_prose = r#"user's args: {"password": "can't_leak_this_secret"}"#;
+        let out1 = scrub_text(apostrophe_prose);
+        assert!(
+            !out1.contains("can't_leak_this_secret"),
+            "apostrophe desync leaked secret: {out1}"
+        );
+        assert!(out1.contains(REDACTED_MARKER));
+
+        // Unmatched standalone single quote before JSON with apostrophe in secret value.
+        let unmatched_quote = r#"note: 'unclosed {"password": "can't_leak_either"}"#;
+        let out2 = scrub_text(unmatched_quote);
+        assert!(
+            !out2.contains("can't_leak_either"),
+            "unmatched quote desync leaked secret: {out2}"
+        );
+        assert!(out2.contains(REDACTED_MARKER));
+
+        // 2. JSON \uXXXX-escaped sensitive key name.
+        assert!(is_sensitive_key(r"pass\u0077ord"));
+        assert!(is_sensitive_key(r"api\u005fkey"));
+        let unicode_key = r#"{"pass\u0077ord": "hunter2_unicode"}"#;
+        let out3 = scrub_text(unicode_key);
+        assert!(
+            !out3.contains("hunter2_unicode"),
+            "unicode-escaped key leaked secret: {out3}"
+        );
+        assert!(out3.contains(REDACTED_MARKER));
+
+        // 3. Nested escaped JSON string under a non-sensitive outer key.
+        let nested_escaped = r#"{"payload": "{\"password\": \"hunter2_nested\"}"}"#;
+        let out4 = scrub_text(nested_escaped);
+        assert!(
+            !out4.contains("hunter2_nested"),
+            "nested escaped JSON leaked secret: {out4}"
+        );
+        assert!(out4.contains(REDACTED_MARKER));
+
+        // Benign nested escaped JSON remains intact.
+        let benign_nested = r#"{"payload": "{\"path\": \"/tmp/safe\"}"}"#;
+        assert_eq!(scrub_text(benign_nested), benign_nested);
     }
 }
