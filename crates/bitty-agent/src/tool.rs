@@ -450,28 +450,32 @@ fn unescape_json_key(key: &str) -> String {
                     continue;
                 }
                 b'u' if i + 5 < bytes.len() => {
-                    if let Ok(hex_str) = std::str::from_utf8(&bytes[i + 2..i + 6])
-                        && let Ok(code) = u32::from_str_radix(hex_str, 16)
-                    {
-                        if (0xD800..=0xDBFF).contains(&code)
-                            && i + 11 < bytes.len()
-                            && bytes[i + 6] == b'\\'
-                            && bytes[i + 7] == b'u'
-                            && let Ok(low_hex) = std::str::from_utf8(&bytes[i + 8..i + 12])
-                            && let Ok(low) = u32::from_str_radix(low_hex, 16)
-                            && (0xDC00..=0xDFFF).contains(&low)
-                        {
-                            let combined = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
-                            if let Some(ch) = char::from_u32(combined) {
+                    if let Ok(hex_str) = std::str::from_utf8(&bytes[i + 2..i + 6]) {
+                        if let Ok(code) = u32::from_str_radix(hex_str, 16) {
+                            if (0xD800..=0xDBFF).contains(&code)
+                                && i + 11 < bytes.len()
+                                && bytes[i + 6] == b'\\'
+                                && bytes[i + 7] == b'u'
+                            {
+                                if let Ok(low_hex) = std::str::from_utf8(&bytes[i + 8..i + 12]) {
+                                    if let Ok(low) = u32::from_str_radix(low_hex, 16) {
+                                        if (0xDC00..=0xDFFF).contains(&low) {
+                                            let combined =
+                                                0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
+                                            if let Some(ch) = char::from_u32(combined) {
+                                                out.push(ch);
+                                                i += 12;
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if let Some(ch) = char::from_u32(code) {
                                 out.push(ch);
-                                i += 12;
+                                i += 6;
                                 continue;
                             }
-                        }
-                        if let Some(ch) = char::from_u32(code) {
-                            out.push(ch);
-                            i += 6;
-                            continue;
                         }
                     }
                 }
